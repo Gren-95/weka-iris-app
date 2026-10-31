@@ -1,36 +1,36 @@
-# Iris species predictor — Weka assignment
+# Iris species predictor
 
-Machine learning model trained in Weka, plus a web app that asks the user for
-measurements and outputs a predicted iris species.
+Small web app for a Weka assignment. A J48 decision tree is trained on the iris
+dataset, and the app predicts the iris species from petal measurements.
+
+**Live demo:** https://gren-95.github.io/weka-iris-app/
 
 ## Files
 
-| File | Purpose |
-|------|---------|
-| `iris.arff` | Training data (150 instances, 4 numeric features, 3 classes). |
-| `weka-output.txt` | Weka training and 10-fold cross-validation output (J48 classifier). |
-| `index.html` | The application: a self-contained web page. No server needed. |
+| File | What it is |
+|------|------------|
+| `iris.arff` | Training data (150 rows, 4 features, 3 classes). |
+| `weka-output.txt` | Weka J48 training + 10-fold cross-validation output. |
+| `index.html` | The app. Reads the two files above and parses the tree at runtime. |
+
+## Run it
+
+The app loads the files with `fetch`, so it needs a web server (it will not work
+from `file://`):
+
+```bash
+python3 -m http.server 8000
+```
+
+Then open http://localhost:8000 — or just use the live demo above.
 
 ## Model
 
-- Algorithm: J48 decision tree (Weka implementation of C4.5).
-- Validation: stratified 10-fold cross-validation.
-- Accuracy: 96% (144/150 correctly classified on cross-validation).
+J48 decision tree (Weka's C4.5), trained in Weka 3.8.6 with 10-fold
+cross-validation, 96% accuracy. The tree uses only petal length and petal width.
 
-The trained tree uses only petal length and petal width. The Weka J48 output is
-embedded verbatim in `index.html` and parsed at runtime into a decision tree, so
-retraining only means replacing that text — no branch logic is hand-written.
-
-## How the model was trained
+Trained with:
 
 ```bash
 java -cp weka.jar weka.classifiers.trees.J48 -t iris.arff > weka-output.txt
 ```
-
-(Weka 3.8.6; `-t` trains on the file and runs 10-fold cross-validation by default.)
-
-## Run the app
-
-Open `index.html` in any web browser. Enter petal length and petal width (cm) —
-the only features the tree uses — and press "Ennusta liik". The page shows the
-predicted species and the decision path the tree followed.
