@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>Iirise liigi ennustaja</title>
+<meta charset="utf-8">
+</head>
+<body style="font-family: Arial; background-color: #eeeeee; margin: 30px;">
+
+<div style="max-width: 460px; margin: 0 auto; text-align: center;">
+
+  <div style="font-size: 26px; font-weight: bold; color: darkgreen;">Iirise liigi ennustaja</div>
+  <div style="color: gray; margin-top: 4px;">Weka J48 otsustuspuu, treenitud iris.arff andmetel</div>
+
+  <div id="info" style="color: gray; font-size: 13px; margin-top: 10px;">Laen faile...</div>
+
+  <div style="background-color: white; border: 1px solid #cccccc; padding: 15px; margin-top: 15px; text-align: left;">
+    <div style="margin-bottom: 10px;">
+      <span style="display: inline-block; width: 200px;">Kroonlehe pikkus (cm):</span>
+      <input type="number" id="pl" step="0.1" value="1.4">
+    </div>
+    <div style="margin-bottom: 10px;">
+      <span style="display: inline-block; width: 200px;">Kroonlehe laius (cm):</span>
+      <input type="number" id="pw" step="0.1" value="0.2">
+    </div>
+    <div style="text-align: center; margin-top: 15px;">
+      <button onclick="predict()" style="background-color: green; color: white; padding: 8px 20px; border: none; cursor: pointer; font-size: 15px;">Ennusta liik</button>
+    </div>
+  </div>
+
+  <div id="viga" style="color: red; margin-top: 10px;"></div>
+
+  <div id="tulemus" style="display: none; background-color: #ddffdd; border: 1px solid green; padding: 15px; margin-top: 20px; text-align: left;">
+    <div><b>Ennustatud liik:</b></div>
+    <div id="liik" style="font-size: 20px; color: darkgreen; font-weight: bold; margin: 8px 0;"></div>
+    <div><b>Otsustuspuu teekond:</b></div>
+    <div id="teekond" style="margin-top: 6px;"></div>
+  </div>
+
+  <div style="font-size: 12px; color: gray; margin-top: 20px;">Failist weka-output.txt loetud ja parsitud puu:</div>
+  <div id="puuTekst" style="background-color: #222222; color: #cccccc; padding: 10px; text-align: left; font-size: 12px; font-family: monospace; white-space: pre; overflow-x: auto;"></div>
+
+</div>
+
+<script>
+// global state
+let tree = null;
+let names = {};  // latin class name -> display name
+
+// display names (classes are read from the arff file, display names here)
+let estonian = {
+  "Iris-setosa": "harilik iiris",
+  "Iris-versicolor": "kirju iiris",
+  "Iris-virginica": "virgiinia iiris"
+};
+
+// ---- parse weka-output.txt ----
+
+function parseLine(line) {
+  let depth = (line.split("|   ").length - 1);
+  let body = line.split("|   ").join("").trim();
+  let m = body.match(/^(\w+)\s*(<=|>=|<|>|=)\s*([\d.]+)(?::\s*(\S+))?/);
+  if (m == null) { return null; }
+  let leaf = null;
+  if (m[4]) { leaf = m[4]; }
+  return { depth: depth, column: m[1], op: m[2], value: parseFloat(m[3]), leaf: leaf };
+}
+
+function buildTree(text) {
+  let lines = text.split("\n");
+  let root = { children: [] };
+  let stack = [{ depth: -1, node: root }];
+  let started = false;
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i].indexOf("J48 pruned tree") != -1) { started = true; continue; }
+    if (!started) { continue; }
+    if (lines[i].indexOf("Number of Leaves") != -1) { break; }
+    let r = parseLine(lines[i]);
+    if (r == null) { continue; }
+    while (stack[stack.length - 1].depth >= r.depth) { stack.pop(); }
+    let node = { column: r.column, op: r.op, value: r.value, leaf: r.leaf, children: [] };
+    stack[stack.length - 1].node.children.push(node);
+    stack.push({ depth: r.depth, node: node });
+  }
+  return root;
+}
+
+// take only the J48 tree block from the output (for display)
+function extractTreeText(text) {
+  let start = text.indexOf("J48 pruned tree");
+  let end = text.indexOf("Number of Leaves");
+  if (start == -1 || end == -1) { return text; }
+  return text.substring(start, end).trim();
+}
+
+// ---- parse iris.arff ----
+
+function parseArff(text) {
+  let lines = text.split("\n");
+  let classes = [];
+  let rows = 0;
+  let inData = false;
+  for (let i = 0; i < lines.length; i++) {
+    let line = lines[i].trim();
+    if (line == "" || line.charAt(0) == "%") { continue; }
+    let lower = line.toLowerCase();
+    // class attribute, e.g. @attribute class {Iris-setosa,Iris-versicolor,Iris-virginica}
+    if (lower.indexOf("@attribute") == 0 && lower.indexOf("class") != -1 && line.indexOf("{") != -1) {
+      let inside = line.substring(line.indexOf("{") + 1, line.indexOf("}"));
+      let parts = inside.split(",");
+      for (let j = 0; j < parts.length; j++) { classes.push(parts[j].trim()); }
+    }
+    if (lower.indexOf("@data") == 0) { inData = true; continue; }
+    if (inData) { rows++; }
+  }
+  return { classes: classes, rows: rows };
+}
+
+// ---- load the files ----
+
+function loadFiles() {
+  // read weka-output.txt and iris.arff directly from the files
+  fetch("weka-output.txt")
+    .then(function (r) { return r.text(); })
+    .then(function (output) {
+      tree = buildTree(output);
+      document.getElementById("puuTekst").innerHTML = extractTreeText(output);
+      return fetch("iris.arff");
+    })
+    .then(function (r) { return r.text(); })
+    .then(function (arff) {
+      let a = parseArff(arff);
+      // bind classes to their display names
+      for (let i = 0; i < a.classes.length; i++) {
+        let c = a.classes[i];
+        names[c] = estonian[c] ? estonian[c] : c;
+      }
+      document.getElementById("info").innerHTML =
+        "Andmeid: " + a.rows + " rida, " + a.classes.length + " klassi (" + a.classes.join(", ") + ")";
+    })
+    .catch(function (err) {
+      document.getElementById("info").innerHTML =
+        "<b style='color:red;'>Faile ei saanud lugeda. Ava leht serveri kaudu (nt: python3 -m http.server), mitte file:// kaudu.</b>";
+    });
+}
+
+// ---- prediction ----
+
+function check(x, op, v) {
+  if (op == "<=") { return x <= v; }
+  if (op == ">=") { return x >= v; }
+  if (op == "<") { return x < v; }
+  if (op == ">") { return x > v; }
+  return x == v;
+}
+
+function predict() {
+  let error = document.getElementById("viga");
+  error.innerHTML = "";
+
+  if (tree == null) {
+    error.innerHTML = "Puu ei ole veel laetud (ava leht serveri kaudu).";
+    return;
+  }
+
+  let pl = parseFloat(document.getElementById("pl").value);
+  let pw = parseFloat(document.getElementById("pw").value);
+
+  if (isNaN(pl) || isNaN(pw)) {
+    error.innerHTML = "Taida molemad valjad!";
+    return;
+  }
+  if (pl < 0 || pw < 0) {
+    error.innerHTML = "Moodud ei saa olla negatiivsed!";
+    return;
+  }
+
+  let features = { petallength: pl, petalwidth: pw };
+
+  let path = [];
+  let node = tree;
+  let species = "";
+  while (node.children.length > 0) {
+    let chosen = null;
+    for (let i = 0; i < node.children.length; i++) {
+      let child = node.children[i];
+      if (check(features[child.column], child.op, child.value)) {
+        chosen = child;
+        break;
+      }
+    }
+    path.push(chosen.column + " (" + features[chosen.column] + ") " + chosen.op + " " + chosen.value);
+    node = chosen;
+    if (chosen.leaf != null) {
+      species = chosen.leaf;
+      break;
+    }
+  }
+
+  let name = names[species] ? names[species] : species;
+  document.getElementById("liik").innerHTML = species + " - " + name;
+  let list = document.getElementById("teekond");
+  list.innerHTML = "";
+  for (let i = 0; i < path.length; i++) {
+    list.innerHTML = list.innerHTML + "<div>" + (i + 1) + ". " + path[i] + "</div>";
+  }
+  document.getElementById("tulemus").style.display = "block";
+}
+
+// load files when the page opens
+loadFiles();
+</script>
+
+</body>
+</html>
